@@ -6,9 +6,8 @@
 
 namespace XLSXTemplate;
 
-use \PHPExcel_IOFactory;
-use \PHPExcel_Worksheet;
-use \PHPExcel_Worksheet_RowIterator;
+use \PHPExcel\IOFactory;
+use \PHPExcel\Worksheet;
 
 class Templator
 {
@@ -16,6 +15,11 @@ class Templator
      * @var string
      */
     private $templateFile;
+
+    /**
+     * @var string
+     */
+    private $templateFileType;
 
     /**
      * @var string
@@ -47,12 +51,12 @@ class Templator
      */
     private $limitColumnLetter;
 
-    public function __construct($templateFile, $outputDir, $outputFileName)
+    public function __construct($templateFile, $outputDir = null, $outputFileName = null)
     {
         if (!file_exists($templateFile) || !is_readable($templateFile)) {
             throw new \InvalidArgumentException('Template file "' . $templateFile . '" is not readable.');
         }
-        if (!is_dir($outputDir) || !is_writable($outputDir)) {
+        if (isset($outputDir) && (!is_dir($outputDir) || !is_writable($outputDir))) {
             throw new \InvalidArgumentException('Output dirirectory "' . $outputDir . '" not writable.');
         }
         $this->templateFile = $templateFile;
@@ -60,11 +64,23 @@ class Templator
         $this->outputFileName = $outputFileName;
     }
 
+    public function loadTemplate()
+    {
+        try {
+            $this->templateFileType = IOFactory::identify($this->templateFile);
+            $objReader = IOFactory::createReader($this->templateFileType);
+            $this->objPHPExcel = $objReader->load($this->templateFile);
+        } catch(\Exception $e) {
+            new \Exception('Error loading file "'.pathinfo($this->templateFile, PATHINFO_BASENAME).'": '.$e->getMessage());
+        }
+    }
+
     /**
      * @param Settings|null $settings
+     * @param int|null $sheetIndex
      * @throws \Exception
      */
-    public function render(Settings $settings = null)
+    public function render(Settings $settings = null, $sheetIndex = 1)
     {
         if ($settings) {
             $this->setSettings($settings);
@@ -72,26 +88,21 @@ class Templator
         if (!$this->settings) {
             throw new \Exception('Template settings are not set.');
         }
-
-        try {
-            $inputFileType = PHPExcel_IOFactory::identify($this->templateFile);
-            $objReader = PHPExcel_IOFactory::createReader($inputFileType);
-            $objPHPExcel = $objReader->load($this->templateFile);
-        } catch(\Exception $e) {
-            new \Exception('Error loading file "'.pathinfo($this->templateFile, PATHINFO_BASENAME).'": '.$e->getMessage());
+        if (!$this->objPHPExcel) {
+            $this->loadTemplate();
         }
 
-        /** @var PHPExcel_Worksheet $worksheet */
-        $worksheet = $objPHPExcel->getSheet(0);
+        /** @var Worksheet $worksheet */
+        $worksheet = $this->objPHPExcel->getSheet(--$sheetIndex);
 
-        /** @var PHPExcel_Worksheet_RowIterator $rowIterator */
+        /** @var Worksheet_RowIterator $rowIterator */
         $rowIterator =  $worksheet->getRowIterator();
 
         foreach ($rowIterator as $row) {
             $cellIterator = $row->getCellIterator();
             $cellIterator->setIterateOnlyExistingCells($this->needsIgnoreEmpty);
 
-            /** @var \PHPExcel_Cell $cell */
+            /** @var \Cell $cell */
             foreach ($cellIterator as $cell) {
                 if ($this->limitColumnLetter && $cell->getColumn() === $this->limitColumnLetter) {
                     break;
@@ -113,24 +124,59 @@ class Templator
                 }
             }
         }
-
-
-
-        $this->objPHPExcel = $objPHPExcel;
     }
 
     /**
-     * Save output file
+     * Save current file
+     *
+     * @param string|null $outputFileName
+     *
+     * @throws \Reader_Exception
+     * @throws \Writer_Exception
      */
-    public function save()
+    public function save($outputFileName = null)
     {
-        $objWriter = PHPExcel_IOFactory::createWriter($this->objPHPExcel, 'Excel2007');
+        if (isset($outputFileName)) {
+            $this->outputFileName = $outputFileName;
+        }
+
+        if (!isset($this->outputFileName)) {
+            throw new \InvalidArgumentException('Output filename is not specified.');
+        }
+
+        $objWriter = IOFactory::createWriter($this->objPHPExcel, $this->templateFileType);
         $objWriter->save($this->outputDir.$this->outputFileName);
     }
 
     /**
-     * @param PHPExcel_Worksheet_RowIterator $rowIterator
-     * @param PHPExcel_Worksheet $worksheet
+     * Send current file to browser
+     *
+     * @param string|null $outputFileName
+     *
+     * @throws \PHPExcel\Writer\Exception
+     */
+    public function output($outputFileName = null)
+    {
+        if (isset($outputFileName)) {
+            $this->outputFileName = $outputFileName;
+        }
+
+        if (!isset($this->outputFileName)) {
+            throw new \InvalidArgumentException('Output filename is not specified.');
+        }
+
+        ob_get_clean();
+
+        header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
+        header('Content-Disposition: attachment;filename="'.rawurlencode($this->outputFileName).'"');
+        header('Cache-Control: max-age=0');
+        $objWriter = IOFactory::createWriter($this->objPHPExcel, $this->templateFileType);
+        $objWriter->save('php://output');
+    }
+
+    /**
+     * @param Worksheet_RowIterator $rowIterator
+     * @param Worksheet $worksheet
      * @param string $cellValue
      */
     private function replaceRowsСontentInLoop($rowIterator, $worksheet, $cellValue)
@@ -139,7 +185,6 @@ class Templator
 
         $loopData = $this->settings->getLoopData($loopKey);
         if ($loopData === false) {
-
             return;
         }
 
@@ -149,7 +194,7 @@ class Templator
         $cellIterator->setIterateOnlyExistingCells(true);
 
         $loopVariables = [];
-        /** @var \PHPExcel_Cell $cell */
+        /** @var \Cell $cell */
         foreach ($cellIterator as $cell) {
             array_push($loopVariables, $cell->getValue());
         }
@@ -169,7 +214,7 @@ class Templator
             $cellIterator->setIterateOnlyExistingCells(true);
             $cellIndex = 0;
 
-            /** @var \PHPExcel_Cell $cell */
+            /** @var \Cell $cell */
             foreach ($cellIterator as $cell) {
                 $pCoordinate = $cell->getColumn().$cell->getRow();
 
@@ -178,11 +223,6 @@ class Templator
                     if ($range && !isset($needToMerge[$range])) {
                         $needToMerge[$range] = null;
                     }
-                    /*$worksheet->duplicateStyle(
-                        $worksheet->getStyle($cell->getColumn().($etalonRow->getRowIndex() - 1)),
-                        $cell->getColumn().($cell->getRow() - 1)
-                    );*/
-                    //print_r('copy '.$cell->getColumn().($etalonRow->getRowIndex()-1).' to '.$cell->getColumn().($cell->getRow() - 1).PHP_EOL);
                 }
 
                 $this->replaceСontentInLoop(
@@ -213,7 +253,7 @@ class Templator
     }
 
     /**
-     * @param PHPExcel_Worksheet $worksheet
+     * @param Worksheet $worksheet
      * @param string $pCoordinate
      * @param string $cellValue
      * @param $dataSource
@@ -243,11 +283,11 @@ class Templator
     }
 
     /**
-     * @param PHPExcel_Worksheet $worksheet
+     * @param Worksheet $worksheet
      * @param string $pCoordinate
      * @param string $cellValue
      */
-    private function replaceСontent(PHPExcel_Worksheet $worksheet, $pCoordinate, $cellValue)
+    private function replaceСontent(Worksheet $worksheet, $pCoordinate, $cellValue)
     {
         $templateKey = $this->extractTemplateKey($cellValue);
         $worksheet->setCellValue($pCoordinate, $this->settings->getValue($templateKey));

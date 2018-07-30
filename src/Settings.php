@@ -22,7 +22,9 @@ class Settings
     {
         if (!empty($mapVariable)) {
             foreach ($mapVariable as $key => $value) {
-                $this->addVariable($key, $value);
+                if ($value) {
+                    $this->addVariable($key, $value);
+                }
             }
         }
     }
