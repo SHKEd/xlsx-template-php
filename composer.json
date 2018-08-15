@@ -1,7 +1,7 @@
 {
     "name": "ranold/xlsx-template-php",
     "description": "A library for templating of Excel Office documents. Supports multisheet MS Excel xlsx. Uses PHPExcel library.",
-    "version": "0.1.2",
+    "version": "0.1.21",
     "type": "library",
     "keywords": [
         "xlsx",
